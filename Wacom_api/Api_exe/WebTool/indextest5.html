@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Web application sample for IoT Paper</title>
+<script type="text/javascript"></script>
+<script src="./public/js/webusb.js"></script>
+
+<script>　resizeTo(1200,800);　</script>
+</head>
+
+<body onload="receiveparam();">
+	<div id="toptext" style="position:absolute; left:120px; top:100px";>　</div>
+	
+	<div id="prevtext" style="position:absolute; left:200px; top:8px;">Select Inkml file：　<input  type="file" id="prevbtn" accept=".inkml"></div>
+	<img id="img1" style="position:absolute; top: 10px; left: 560px; width: 480px; height: 640px; visibility:hidden;">
+
+	<div id="setsumei1" style="visibility:hidden; position:absolute; left:40px; top:50px; width:440; font-size:20px">Reproduction of Inkml</div>
+	<div id="setsumei2" style="visibility:hidden; position:absolute; left:60px; top:90px; width:440; font-size:16px">Introduction</div>
+
+    <div id="anstime1" style="position:absolute; top:200px; left:200px; visibility:hidden;">Image on IoT Paper</div>
+
+	<canvas width="680" height="750" id="canvas1" style="position:absolute; left:530px; top:10px; z-index: 3000;"></canvas>
+
+	<button id="closewin" type="button" onclick="progend()" style="position:absolute; left:60px; top:10px; width:180px; height:30px; background:orange; visibility:hidden; z-index: 4000;"> Close this window </button>
+	<button id="normalbtn" type="button" onclick="normaldisp()" style="position:absolute; left:30px; top:200px; width:120px; height:30px; visibility:hidden; background:whitesmoke"> Display image    </button>
+	<button id="speedbtn" type="button" onclick="speeddisp()" style="position:absolute; left:30px; top:240px; width:120px; height:30px; visibility:hidden; background:whitesmoke"> Speed transition </button>
+	<button id="pressbtn" type="button" onclick="pressdisp()" style="position:absolute; left:30px; top:280px; width:120px; height:30px; visibility:hidden; background:whitesmoke"> Pressure level   </button>
+	<button id="tiltbtn" type="button" onclick="tiltdisp()" style="position:absolute; left:30px; top:320px; width:120px; height:30px; visibility:hidden; background:whitesmoke"> Tilt direction   </button>
+	<button id="hoverbtn" type="button" onclick="hoverdisp()" style="position:absolute; left:30px; top:360px; width:120px; height:30px; visibility:hidden; background:whitesmoke"> Pen trajectory   </button>
+	<button id="savebtn" type="button" onclick="reproinkml()" style="position:absolute; left:30px; top:540px; width:120px; height:30px; visibility:hidden; background:whitesmoke"> Reproduction     </button>
+	<button id="copybtn" type="button" onclick="saveFile()" style="position:absolute; left:30px; top:580px; width:120px; height:30px; visibility:hidden; background:whitesmoke">　Download　</button>
+
+	<button id="investbtn" type="button" onclick="resultinkml()" style="position:absolute; left:30px; top:500px; width:120px; height:30px; visibility:hidden; background:whitesmoke"> Pen transition   </button>
+	<button id="playbtn" type="button" onclick="playdisp()" style="position:absolute; left:480px; top:596px; visibility:hidden; background:gray">　▶　</button>
+
+	<canvas width="310" height="100" id="canvas2" style="position:absolute; left:180px; top:510px; z-index: 2500;"></canvas>
+
+	<div><input type="range" id="inputSlideBar" min="0" max="100" step="1" style="position:absolute; left:180px; top:600px; width:290px; visibility:hidden; z-index: 2600;";></div>
+	<div id="sldvalue" style="position:absolute; left:180px; top:620px;"> </div>
+
+<script>
+	var slidevalue = 100;
+	//----------------------------------------------------
+	// Key operation (Enter, Right / Left allow)
+	const inputSlideBarElement = document.getElementById('inputSlideBar');
+	document.addEventListener('keydown', function (e) {
+		let output = ``;
+		if (e.keyCode === 13) {
+			if (testStart == 1) {
+				output = `Return`;
+			}
+		} else if (e.code == 'KeyA' || e.code == 'ArrowLeft') {
+				output = `Left`;
+				if (slidevalue > 0){
+					slidevalue = Number(inputSlideBarElement.value) - 1;
+					inputSlideBarElement.value = slidevalue;
+					progressdisp(slidevalue);
+					document.getElementById('sldvalue').innerText = "( " + slidevalue + " % )";
+				}
+		} else if (e.code == 'KeyD' || e.code == 'ArrowRight') {
+				output = `Right`;
+				if (slidevalue < 100) {
+					slidevalue = Number(inputSlideBarElement.value) + 1;
+					inputSlideBarElement.value = slidevalue;
+					progressdisp(slidevalue);
+					document.getElementById('sldvalue').innerText = "( " + slidevalue + " % )";
+				}
+		}
+		console.log(output);
+	})
+
+	//----------------------------------------------------
+	// Slider bar operation, replay to slider % (progressdisp(%))
+	inputSlideBarElement.addEventListener('change', function(){
+		slidevalue = inputSlideBarElement.value;
+		progressdisp(slidevalue);
+		document.getElementById('sldvalue').innerText = "( " + slidevalue + " % )";
+		console.log("%:" + inputSlideBarElement.value);//(例)console => 90
+	});
+
+	//----------------------------------------------------
+	// Preview button 
+	var obj1 = document.getElementById("prevbtn");
+	obj1.addEventListener("change",function(evt){
+		var file = evt.target.files;
+		console.log(file);
+
+		var reader = new FileReader();
+		// Read as text data
+		reader.readAsText(file[0]);
+		reader.onload = function(ev){
+			fcon = reader.result;
+			document.getElementById('toptext').style.visibility = "hidden";
+			buttoncolor(0);
+			preview();
+		}
+	},false);
+
+	function sltest(){
+		document.getElementById('inputSlideBar').value = document.getElementById("test").value;
+	}
+	
+	//----------------------------------------------------
+	const _sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+	let testStart = 0;					// Test mode ( 0:Not started, 1:During test, 2:End test )
+	var testtime = 0;					// elapsed time for each page
+	var fstatus = 0;					// inkml read status
+	var fcon;							// editing inkml data content
+	let totalpkt = 0;					// Total packet
+
+	let pktcounter = 0;
+	let progress = 0;
+	let progress2 = 0;
+	let drawmode = 0;
+
+	const xscale = 480 / 15725;
+	const yscale = 640 / 20967;
+	const tscale = 40;					// tilt line length (px)
+	const tiltint = 5;					// thin out count
+	
+	// color table (20 level)
+	const colorTableR = ['#ffff80','#ffdd40','#ffcc00','#ffbb00','#ffaa00','#ff9900','#ff8800','#ff7700','#ff6600','#ff5500',
+						 '#ff4400','#ff2200','#ff0000','#ff0022','#ff0044','#ee0055','#dd1166','#cc1177','#bb1188','#aa2288',
+						 '#992288','#880088','#660088','#550088'];
+	const colorTableG = ['#004400','#005500','#006600','#007700','#008800','#009900','#00aa00','#00bb00','#00cc00','#00dd00',
+						 '#00ee00','#00ff00','#00ff00','#00ff00'];
+	const colorTableB = ['#40ffff','#20ddff','#00ccff','#00bbff','#00aaff','#0099ff','#0088ff','#0077ff','#0066ff','#0055ff',
+						 '#0044ff','#0022ff','#0000ff','#1100ff','#2200ff','#3300ff','#4400ee','#5500dd','#6600cc','#7700bb',
+						 '#8800aa','#661199','#441188','#222288'];
+
+	let dispmode = 0;							// simulation mode
+	let prevtxt = "Reproduction of Inkml";
+	let setsu2txt = "This page reproduces the selected Inkml file\nand extracts features based on various data\ncontained in the Inkml.";
+	let inkimlopen = "Saved inkml file is \n\n";
+
+	//----------------------------------------------------
+	// Receive parameter when calling this html from Windows program
+	async function receiveparam() {
+		var param = location.search;
+		var path = param.substring(6, param.length);
+		var filename = "";
+		console.log(path);
+		if (path.match(/.inkml/)){
+			var name = path.split(/Result/)	;
+			filename = name[1].substring(1, name[1].length);
+			path = path.substring(0,path.length - filename.length);
+			console.log("path:" + path);	
+			console.log("name:" + filename);	
+		}
+		toptext.innerText = "Saved Inkml file is placed in a folder with the following path: \n\n" + path + "\n\nFile name is : " + filename ;
+
+		fstatus = 0;
+		var canvas = document.getElementById('canvas1');
+		canvas.style.visibility = "hidden";
+  		if (canvas.getContext) {
+    		var ctx = canvas.getContext('2d');
+			//ctx.strokeRect(30, 0, 526, 701);		// frame 
+		}
+		var canvas2 = document.getElementById('canvas2');
+		canvas2.style.visibility = "hidden";
+
+	}
+
+	//----------------------------------------------------
+	// inkml preview
+	async function preview(){
+		console.log("preview start");
+		document.getElementById('prevtext').style.visibility = "hidden";
+		let imgd1 = document.getElementById('img1'); // center
+		let setsumeitxt = document.getElementById("setsumei1");
+		let setsumei2txt = document.getElementById("setsumei2");
+
+		twrtotal = 0;
+		tpendown = 0;
+		strokecnt = 0;
+		testtime = 0;
+		fstatus = 1;
+		imgd1.src = await inkmlRead();			
+		imgd1.style.visibility = "visible";
+		imgd1.style.border = "1px solid #000";
+
+		testStart = 2;
+								
+		percentage();
+
+		setsumeitxt.innerText = prevtxt;
+		setsumei2txt.innerText = setsu2txt;
+		setsumeitxt.style.visibility = "visible";	// 説明文表示(暫定)
+		document.getElementById('setsumei2').style.visibility = "visible";
+		document.getElementById('closewin').style.visibility = "visible";
+		document.getElementById('anstime1').style.visibility = "visible";
+		document.getElementById("normalbtn").style.visibility = "visible";
+		document.getElementById("speedbtn").style.visibility = "visible";
+		document.getElementById("pressbtn").style.visibility = "visible";
+		document.getElementById("hoverbtn").style.visibility = "visible";
+		document.getElementById("tiltbtn").style.visibility = "visible";
+		//document.getElementById("intervalbtn").style.visibility = "visible";
+		document.getElementById("inputSlideBar").style.visibility = "visible";
+		document.getElementById("playbtn").style.visibility = "visible";
+		document.getElementById("savebtn").style.visibility = "visible";
+		document.getElementById("investbtn").style.visibility = "visible";
+		//savedone = 0;
+	}
+
+	//----------------------------------------------------
+	// Show speed, pressure etc.
+	function percentage(){
+		var percent = new Array(3);			// temporary
+		if (twrtotal > 0)
+			percent[1] = Math.round(tpendown * 100 / twrtotal);
+		else percent[1] = 0;
+
+		inkmlchk();
+		progress = totalpkt; 	// 100% progress 
+
+		if (pendowncnt == 0) {
+			document.getElementById('anstime1').innerText = "Writing time: " + testtime + " sec\nStroke count: " + strokecnt + "\n";
+		}
+		else {
+			var maxinterval = 0;
+			var mininterval = 1800000;
+			var intervaltotal = 0;
+			//console.log(strokeint);
+			console.log("pen down: " + pendowncnt);
+			for (var i=0; i<strokecnt; i++){
+				if (maxinterval < strokeint[i]) maxinterval = strokeint[i];		// max interval
+				if (mininterval > strokeint[i]) mininterval = strokeint[i];		// min interval
+				intervaltotal = intervaltotal + strokeint[i];
+			}
+			var intervalavr = Math.round(intervaltotal / strokecnt);
+			document.getElementById('anstime1').innerText = "Writing time: " + testtime + " sec\nStroke count: " 
+			+ strokecnt + "\nPen down ratio: " + percent[1] 
+			+ "%\n- Pen speed ave.: " + averagespd + " mm/s\n  (Max: " + maxspeed + " mm/s  Min: " + minspeed 
+			+ " mm/s )\n- Pressure ave.: " + averageprs + "\n  (Max: " + maxpress + "  Min: " + minpress 
+			+ " )\n- Packet count: " + totalpkt + "\n  (On: " + pdpkttotal + "  Off: " + pupkttotal 
+			+ " )\n- Stroke interval ave.: " + intervalavr + " msec\n  (Max: " + maxinterval + "  Min: " + mininterval + " )";
+		}
+	}
+	
+	//----------------------------------------------------
+	// Buttons color
+	function buttoncolor(mode){
+		document.getElementById('normalbtn').style.backgroundColor="whitesmoke";
+		document.getElementById('speedbtn').style.backgroundColor="whitesmoke";
+		document.getElementById('pressbtn').style.backgroundColor="whitesmoke";
+		document.getElementById('hoverbtn').style.backgroundColor="whitesmoke";
+		document.getElementById("tiltbtn").style.backgroundColor="whitesmoke";
+		switch (mode){
+			case 0: document.getElementById('normalbtn').style.backgroundColor="yellow"; break;
+			case 1: document.getElementById('speedbtn').style.backgroundColor="yellow"; break;
+			case 2: document.getElementById('pressbtn').style.backgroundColor="yellow"; break;
+			case 4: document.getElementById('hoverbtn').style.backgroundColor="yellow"; break;
+			case 5: document.getElementById("tiltbtn").style.backgroundColor="yellow"; break;
+		}
+	}
+	
+	//----------------------------------------------------
+	// Color bar display related to selection
+	function colorbar(mode){
+		var roop = 0, wd = 0;
+		console.log("disp color bar");
+		var canvas = document.getElementById('canvas2');
+  		if (canvas.getContext) {
+ 			var ctx = canvas.getContext('2d');
+			ctx.clearRect(0, 0, 310, 100);
+			ctx.font = "12px 'Ariel'";
+			ctx.strokeStyle = "black";
+			ctx.textBaseline = "top";
+			if (mode == 1) { 
+				roop = 22; wd = 14; 
+				ctx.strokeText('Speed 0 to 300 mm/s', 0, 0);
+			}
+			else if (mode == 2) { 
+				roop = 22; wd = 14; 
+				ctx.strokeText('Pressure 0 to 4096', 0, 0);
+			}
+			else if (mode == 4) {
+				roop = 12; wd = 25; 
+				ctx.strokeText('Height 0 to 10 mm', 0, 0);
+			}
+			else return;
+
+			for (var i=0; i<roop; i++){
+				ctx.beginPath () ;
+				ctx.rect( (i * wd), 20, wd, 40 ) ;
+				//console.log("rect x: " + (i*wd));
+				switch (mode){
+				case 1: ctx.fillStyle = colorTableB[i]; break;
+				case 2: ctx.fillStyle = colorTableR[i]; break;
+				case 4: ctx.fillStyle = colorTableG[i]; break;
+				}
+				ctx.fill();
+			}
+		}	
+		canvas.style.visibility = "visible";
+	}
+
+	//----------------------------------------------------
+	// Analysis buttons
+	async function speeddisp(){
+		// canvas clear
+		if (drawmode == 0 && dispmode == 1) return;
+		if (testStart != 2) return;
+		buttoncolor(1);
+		var canvas = document.getElementById('canvas1');
+		canvas.style.visibility = "hidden";
+  		if (canvas.getContext) {
+ 			var ctx = canvas.getContext('2d');
+			ctx.clearRect(0, 0, 680, 750);
+		}
+		inputSlideBarElement.value = 100;
+		dispmode = 1;
+		drawmode = 0;
+		document.getElementById('img1').src = await inkmlRead();
+		document.getElementById('sldvalue').innerText = "( 100% )";
+		colorbar(1);
+	}
+
+	async function pressdisp(){
+		if (drawmode == 0 && dispmode == 2) return;
+		if (testStart != 2) return;
+		buttoncolor(2);
+		var canvas = document.getElementById('canvas1');
+		canvas.style.visibility = "hidden";
+  		if (canvas.getContext) {
+ 			var ctx = canvas.getContext('2d');
+			ctx.clearRect(0, 0, 680, 750);
+		}
+		inputSlideBarElement.value = 100;
+		dispmode = 2;
+		drawmode = 0;
+		document.getElementById('img1').src = await inkmlRead();
+		document.getElementById('sldvalue').innerText = "( 100% )";
+		colorbar(2);
+	}
+
+	async function tiltdisp(){
+		if (drawmode == 0 && dispmode == 5) return;
+		if (testStart != 2) return;
+		buttoncolor(5);
+		document.getElementById('canvas2').style.visibility = "hidden";
+		var canvas = document.getElementById('canvas1');
+		canvas.style.visibility = "hidden";
+  		if (canvas.getContext) {
+ 			var ctx = canvas.getContext('2d');
+			ctx.clearRect(0, 0, 680, 750);
+		}
+		inputSlideBarElement.value = 100;
+		dispmode = 5;
+		drawmode = 0;
+		document.getElementById('img1').src = await inkmlRead();
+		document.getElementById('sldvalue').innerText = "( 100% )";
+	}
+
+	async function normaldisp(){
+		if (drawmode == 0 && dispmode == 0) return;
+		if (testStart != 2) return;
+		buttoncolor(0);
+		document.getElementById('canvas2').style.visibility = "hidden";
+		var canvas = document.getElementById('canvas1');
+		canvas.style.visibility = "hidden";
+  		if (canvas.getContext) {
+ 			var ctx = canvas.getContext('2d');
+			ctx.clearRect(0, 0, 680, 750);
+		}
+		dispmode = 0;
+		drawmode = 0;
+		document.getElementById('img1').src = await inkmlRead();
+		document.getElementById('sldvalue').innerText = "　";
+
+	}
+
+	async function hoverdisp(){
+		if (drawmode == 0 && dispmode == 4) return;
+		if (testStart != 2) return;
+		buttoncolor(4);
+		var canvas = document.getElementById('canvas1');
+		canvas.style.visibility = "hidden";
+  		if (canvas.getContext) {
+ 			var ctx = canvas.getContext('2d');
+			ctx.clearRect(0, 0, 680, 750);
+		}
+		inputSlideBarElement.value = 100;
+		dispmode = 4;
+		drawmode = 0;
+		document.getElementById('img1').src = await inkmlRead();		
+		document.getElementById('sldvalue').innerText = "( 100% )";
+		colorbar(4);
+	}
+	
+	//----------------------------------------------------
+	// Draw pen strokes until slider %
+	async function progressdisp(bar){
+		if (testStart != 2) return;
+		console.log("Progress call - %:" + bar)
+		var canvas = document.getElementById('canvas1');
+		canvas.style.visibility = "hidden";
+  		if (canvas.getContext) {
+ 			var ctx = canvas.getContext('2d');
+			ctx.clearRect(0, 0, 680, 750);
+		}
+		drawmode = 1;
+		progress = Math.round(totalpkt * bar / 100);
+		console.log("progress test, total packet:" + totalpkt + "  progress:" +progress);		
+		document.getElementById('img1').src = await inkmlRead();			
+		drawmode = 0;
+	}
+
+	//----------------------------------------------------
+	// Windows close
+	function progend(){
+		console.log("Close window");
+		window.close();
+	}
+	
+	//----------------------------------------------------
+	var drawint = 1;
+	var drawdiv = 0;
+	// Draw interval (need adjustment)
+	const drinterval = ['3','3','4','4','5','5','6','6','7','7','8','8','9','9','10','11','12','13','14','15']
+	//----------------------------------------------------
+	// Replay pen strokes
+	async function playdisp(){
+		if (drawmode == 2) return;
+		if (testStart != 2) return;
+		if (dispmode == 0) return;
+		console.log("play button set")
+		var canvas = document.getElementById('canvas1');
+		canvas.style.visibility = "hidden";
+  		if (canvas.getContext) {
+ 			var ctx = canvas.getContext('2d');
+			ctx.clearRect(0, 0, 680, 750);
+		}
+		// get start packet number (if 100% slider, then start from the beginning)
+		var barlevel = inputSlideBarElement.value;
+		if (barlevel == 100) {
+			inputSlideBarElement.value = 0;
+			barlevel = 0;
+		}
+		progress2 = Math.round(totalpkt * barlevel / 100);
+		progress = totalpkt;
+		console.log("bar:" + barlevel + "% start:" + progress2 + " end:" + progress);
+		// get interval ------
+		drawdiv = 1;
+		var drtime = testtime;
+		if (drtime > 9) {
+			drawint = 1;
+			if (drtime >32) drawdiv = 16;
+			else if (drtime <13) drawdiv = 2;
+			else drawdiv = drinterval[drtime-13];
+		}
+		else if (drtime > 6) drawint = 2;
+		else drawint = 3;
+
+		console.log("** drawinterval: " + drawint + " div:" + drawdiv);
+		drawmode = 2;
+		document.getElementById('img1').src = await inkmlRead();		
+		inputSlideBarElement.value = 100;
+		document.getElementById('sldvalue').innerText = "( 100% )";
+		drawmode = 0;
+		progress2 = 0;
+	}
+
+	//----------------------------------------------------
+	// Inkml 3D replay (inkmldec.html by using local storage)
+	function reproinkml(){
+		if (fstatus == 2){
+			let message = fcon;
+			localStorage.setItem('key', JSON.stringify(message));
+			var popup = window.open("./inkmldec.html", "inkml decode", 'top=10,left=30,width=1000,height=750');
+		}
+		else console.log("no inkml update");
+	}
+
+	//----------------------------------------------------
+	// Time elapsed of pressure and speed (result.html by using local storage)
+	function resultinkml(){
+		if (fstatus == 2){
+			let message = fcon;
+			localStorage.setItem('key', JSON.stringify(message));
+			var popup = window.open("./result.html?" + slidevalue, "inkml decode", 'top=10,left=30,width=1000,height=720');
+		}
+		else console.log("no inkml update");
+	}
+
+
+	//----------------------------------------------------
+	// Recording various data for analysis
+	var strokecnt = 0;		// stroke count
+	var twrtotal = 0;		// total writing time	
+	var tpendown = 0; 		// total pen down time
+	var averagespd = 0;		// average of stroke speed
+	var maxspeed = 0;		// max stroke speed
+	var minspeed = 0;		// min stroke speed
+	var averageprs = 0;		// average of pressure level
+	var maxpress = 0;		// max pressure level
+	var minpress = 0;		// min pressure level
+	// Recording data for each stroke
+	var strokeavrs = new Array(400);		// each stroke speed average
+	var strokeavrp = new Array(400);		// each stroke pressure average
+	var strokeint = new Array(400);			// interval between strokes
+	var precounter = 0;
+
+	//----------------------------------------------------
+	// Read Base64 data from the inkml data and return it as a return value
+	async function inkmlRead(){
+
+		var canvas = document.getElementById('canvas1');
+   		var ctx = canvas.getContext('2d');
+		canvas.style.visibility = "visible";
+
+		let decodeType = 0;
+		let textMatch0 = "</";
+		let textMatch1 = "</paper";
+		let imageBmp0;					// base64 data in inkml
+		let pdcnt = 0;					// pen down count on this page
+		let wrtlasttime = 0;			// timestamp of last pen down
+		let pdtotaltime = 0;			// total pen down time
+		let laststr = "0";				// the latest timestamp
+		let x0 , x1, y0, y1;			// for line drawing
+		let xpx0, ypx0, xpx1, ypx1;		// for calculate speed 
+		let spdavr = 0;					// work for getting speed average
+		let maxspd = 0;					// max value of speed average in 1 stroke
+		let minspd = 1000;				// min value of speed average in 1 stroke
+		let prsavr = 0;					// work for getting pressure average
+		let maxprs = 0;					// max value of pressure average in 1 stroke
+		let minprs = 4096;				// min value of pressure average in 1 stroke
+		
+		let heightavr = 0;				// average of height
+		let maxspdoff = 0;				// max value of pen off speed average in 1 stroke
+		let minspdoff = 1000;			// min value of pen off speed average in 1 stroke
+		let maxheight = 0;				// max value of height average in 1 stroke
+		let minheight = 256;			// min value of height average in 1 stroke
+
+		// decode start ---
+		pktcounter = 0;
+		let index = 0;
+		var arySplit = fcon.split(/,|\n/);
+		console.log("* Inkml Decode Start *");
+
+		while (!arySplit[index].match(textMatch1)) {
+			if (arySplit[index].match(/<templateImage /)) {
+				index++;
+				var arySplit2 = arySplit[index].split(textMatch0);
+				imageBmp0 = "data:image/bmp;base64," + arySplit2;
+				console.log("  find template image");
+			}
+			if (arySplit[index].match(/<workImage /)) {
+				index++;
+				var arySplit2 = arySplit[index].split(textMatch0);
+				if (dispmode == 0 || dispmode == 5)
+					imageBmp0 = "data:image/bmp;base64," + arySplit2;
+				console.log("  find work image");
+				fstatus = 2;	// work image exist
+				//decodeType = 1;
+			}
+			if (arySplit[index].match(/<inkml:trace /)){
+				var penon = 0;
+				if (arySplit[index].match(/penDown/)) penon = 1;
+				else penon = 0;
+	  			arySplit[index] = arySplit[index].trim();
+	  			var arySplit2 = arySplit[index].split(/\s/);
+	  			//get start time from "timeOffset"
+				var timeofs = Number(arySplit2[3].substring(12,arySplit2[3].length-1)); 
+				var packetcnt = 0;
+				var speed = 0;
+				var press = 0;
+				var penoffcnt = 0;				// packet count in 1 stroke (pen up)
+				var height = 0;
+				var tiltintcnt = 0;
+				
+				// Start one stroke process ---
+				index++;
+				while (!arySplit[index].match(/inkml:trace>/)){ 
+		  			arySplit[index] = arySplit[index].trim();
+		  			// Pen down sampling start
+					if (penon == 1){
+						var packet = arySplit[index].split(/ /);
+						if (packetcnt == 0) {							// First packet
+							x1 = packet[0];
+							y1 = packet[1];
+							xpx1 = Math.round(x1*xscale)+31;
+							ypx1 = Math.round(y1*yscale)+1;
+							// 描画色の設定
+						    if (dispmode == 1)
+							    ctx.strokeStyle = colorTableB[0];
+							else if (dispmode == 2)
+								ctx.strokeStyle = colorTableR[0];
+							else if (dispmode == 3) {
+								if ((timeofs - wrtlasttime) > 5000 )
+									ctx.strokeStyle = "darkviolet";
+								else if ((timeofs - wrtlasttime) > 3000)
+									ctx.strokeStyle = "magenta";
+								else if ((timeofs - wrtlasttime) > 1500)
+									ctx.strokeStyle = "red";
+								else ctx.strokeStyle = "black";
+							}
+							else if (dispmode == 4) 
+								ctx.strokeStyle = "goldenrod";
+							else if (dispmode == 5){
+								var xt = Math.round(packet[4] * tscale / 9000);
+								var yt = Math.round(packet[5] * tscale / 9000);
+								ctx.strokeStyle = "chocolate";
+								ctx.beginPath();
+								ctx.moveTo(xpx1, ypx1);
+								ctx.lineTo((xpx1 + xt), (ypx1 + yt));
+								ctx.closePath();
+								ctx.stroke();
+							}
+						} else {										// After 2nd packet
+							x0 = packet[0];
+							y0 = packet[1];
+						    var speed1 = Math.round(Math.sqrt(Math.pow(x0-x1, 2) + Math.pow(y0-y1, 2)) *10/ 3);
+							if (maxspd < speed1) maxspd = speed1;		// Save maximum speed
+							if (minspd > speed1) minspd = speed1;		// Save minimum speed
+							speed = speed + speed1;						// sum of speed in this stroke
+							var press1 = Number(packet[2]);
+							if (maxprs < press1) maxprs = press1;		// Save maximum pressure
+							if (minprs > press1) minprs = press1;		// Save minimum pressure
+							press = press + press1;						// sum of pressure in this stroke
+							xpx0 = Math.round(x0*xscale)+31;
+							ypx0 = Math.round(y0*yscale)+1;
+							if (dispmode == 1 || dispmode == 2 || dispmode == 3 || dispmode == 4){		// Drawing on canvas
+								var avs = Math.round(speed1/13);		// 13 * 23 = 299
+								if (avs > 23) avs = 23;
+								var avp = Math.round(press1/170);		// 170 * 23 = 3910
+								if (avp > 23) avp = 23;
+								// Set color of drawing line
+							    if (dispmode == 1)
+								    ctx.strokeStyle = colorTableB[avs];
+								else if (dispmode == 2)
+								    ctx.strokeStyle = colorTableR[avp];
+							    ctx.beginPath();
+							    ctx.moveTo(xpx1, ypx1);
+							    ctx.lineTo(xpx0, ypx0);
+							    ctx.closePath();
+							    ctx.stroke();
+							}
+							else if (dispmode == 5){
+								tiltintcnt++;
+								if (tiltintcnt == tiltint) {
+									var xt = Math.round(packet[4] * tscale / 9000);
+									var yt = Math.round(packet[5] * tscale / 9000);
+									ctx.strokeStyle = "chocolate";
+									ctx.beginPath();
+									ctx.moveTo(xpx0, ypx0);
+									ctx.lineTo((xpx0 + xt), (ypx0 + yt));
+									ctx.closePath();
+									ctx.stroke();
+									tiltintcnt = 0;
+								}
+							}
+						    //console.log("line:"+xpx1+","+ypx1+"-"+xpx0+","+ypx0);
+							x1 = x0;
+							y1 = y0;
+							xpx1 = Math.round(x1*xscale)+31;
+							ypx1 = Math.round(y1*yscale)+1;
+						}
+					} else { // Pen hovering
+						var packet = arySplit[index].split(/ /);
+						if (penoffcnt == 0) {
+							x1 = packet[0];
+							y1 = packet[1];
+							xpx1 = Math.round(x1*xscale)+31;
+							ypx1 = Math.round(y1*yscale)+1;
+						} else {
+							x0 = packet[0];
+							y0 = packet[1];
+							// hovering speed recording
+						    var speed1 = Math.round(Math.sqrt(Math.pow(x0-x1, 2) + Math.pow(y0-y1, 2)) *10/ 3);
+							if (maxspdoff < speed1) maxspdoff = speed1;		// Save maximum speed
+							if (minspdoff > speed1) minspdoff = speed1;		// Save minimum speed
+							//speed = speed + speed1;						// sum of speed in this stroke
+							var height1 = - Number(packet[3]);
+							if (maxheight < height1) maxheight = height1;	// Save maximum height
+							if (minheight > height1) minheight = height1;	// Save minimum height
+							height = height + height1;						// sum of height value in this stroke
+							xpx0 = Math.round(x0*xscale)+31;
+							ypx0 = Math.round(y0*yscale)+1;
+							if (dispmode == 4){								// Drawing on canvas when hovering
+								// Canvasへの描画
+								ctx.strokeStyle = colorTableG[height1/10];
+							    ctx.beginPath();
+							    ctx.moveTo(xpx1, ypx1);
+							    ctx.lineTo(xpx0, ypx0);
+							    ctx.closePath();
+							    ctx.stroke();
+							}
+							x1 = x0;
+							y1 = y0;
+							xpx1 = Math.round(x1*xscale)+31;
+							ypx1 = Math.round(y1*yscale)+1;
+						}
+						penoffcnt++;
+					}
+					// pen down stroke end
+					index++;
+					if (penon == 1) packetcnt++;
+
+					// prevew mode -------
+					if ((drawmode > 0) && (pktcounter++ > progress) ) {
+						console.log("** progress: pkt counter=" + pktcounter);
+						return imageBmp0;
+					}
+					if (drawmode == 2) {
+						if (progress2 < pktcounter) {
+							if (drawint < 2 )
+							{
+								var tempitv = index % drawdiv;
+								if (tempitv == 0) {
+									await _sleep(drawint);
+								}
+							} else await _sleep(drawint);
+						}
+					}
+					// --------------------
+				}
+				// One stroke end ----
+				var arySplit1 = arySplit[index-1].trim();
+				var packet2 = arySplit1.split(/ /);
+				laststr = packet2[7];										// Last timestamp
+				if (penon == 1){
+					var speedtmp = speed / (packetcnt);						// Speed average for each stroke
+					strokeavrs[pdcnt] = Math.round(speedtmp);
+					spdavr = spdavr + speedtmp;								// Sum of speed average for each stroke
+					//console.log("prs:" + press + " cnt:" + packetcnt);
+					var presstmp = Math.round(press / packetcnt);
+					strokeavrp[pdcnt] = Math.round(presstmp);
+					prsavr = prsavr + presstmp;								// Sum of pressure average for each stroke
+					strokeint[pdcnt] = timeofs - wrtlasttime;
+					//console.log("last: " + wrtlasttime + " begin: " + timeofs);
+					wrtlasttime = Number(laststr);							// pendown last time
+					if (pdcnt < 400)
+						pdcnt++;
+					pdtotaltime = pdtotaltime + (wrtlasttime - timeofs);	// Total time of pen down strokes
+				}
+			}
+			index++;
+			
+		}
+		
+		if(pdcnt>0) {
+			averagespd = Math.round(spdavr / pdcnt);
+			averageprs = Math.round(prsavr / pdcnt);
+		}
+		else {
+			averagespd = 0;
+			averageprs = 0;
+		}
+		strokecnt = pdcnt;				// pen down count
+		tpendown = pdtotaltime;			// sum of pen down time
+		twrtotal = Number(laststr);		// change to binary for the last time stamp
+		maxspeed = Math.round(maxspd);	// Maximum speed in this page
+		maxpress = maxprs;
+		if (minspd == 1000) minspd = 0;			// if no stroke...
+		if (minprs == 4096) minprs = 0;			// if no stroke...
+		minspeed = Math.round(minspd);	// minimum speed in this page
+		minpress = minprs;
+		console.log("pen analysis: pen down=" + pdcnt + " pd time=" + pdtotaltime + " total=" + laststr + " spd=" + averagespd);
+		return imageBmp0;
+	}
+	
+
+	//----------------------------------------------------
+	var strokeoncnt = new Array(400);		// pen down packet count for each stroke
+	var strokeoffcnt = new Array(400);		// pen up packet count for each stroke
+	var pendowncnt = 0;						// stroke count of pen down
+	var penupcnt = 0;						// stroke count of pen up
+	var pdpkttotal = 0;						// pen down packet total
+	var pupkttotal = 0;						// pen up packet total
+
+	//----------------------------------------------------
+	// Get total packet count and last timestamp from inkml data
+	function inkmlchk(){
+		let textMatch0 = "</";
+		let textMatch1 = "</paper";
+		let textMatch2 = "</inkml:definitions>";
+		let x0 , x1, y0, y1;				// for calculating speed 
+		let penon = 0;						// pen tip mode : pen down stroke is "1"
+		let penoncnt = 0;					// packet count in 1 stroke (pen down)
+		let penoffcnt = 0;					// packet count in 1 stroke (pen up)
+		let arySplit1;
+
+		// counter initialize ---
+		pendowncnt = 0;
+		penupcnt = 0;
+		pdpkttotal = 0;	
+		pupkttotal = 0;
+		for (var i=0; i<400; i++) {
+			strokeoncnt[i]=0; 
+			strokeoffcnt[i]=0;
+		}
+		
+		// decode start ---
+		let lasttime = 0;
+		let lasttimetmp = 0;
+		let index = 0;
+		var arySplit = fcon.split(/,|\n/);
+		console.log("* Inkml check Start *");
+		while (!arySplit[index].match(textMatch1)) {
+			if (arySplit[index].match(/<inkml:trace /)){
+				if (arySplit[index].match(/penDown/)) penon = 1;
+				else penon = 0;
+				
+	  			arySplit1 = arySplit[index].trim();
+	  			var arySplit2 = arySplit1.split(/\s/);
+				// Start one stroke process ---
+				index++;
+				while (!arySplit[index].match(/inkml:trace>/)){ 
+		  			arySplit1 = arySplit[index].trim();
+					if (penon == 1){
+						penoncnt++;
+					} else {
+						penoffcnt++;
+					}
+					index++;		// next packet check...
+				}
+				if (penon == 1){
+					strokeoncnt[pendowncnt] = penoncnt;		// save packet count in 1 stroke (pen down)
+					if (pendowncnt<400) pendowncnt++;
+					penoncnt = 0;
+				}
+				else {
+					strokeoffcnt[penupcnt] = penoffcnt;		// save packet count in 1 stroke (pen up)
+					if (penupcnt<400) penupcnt++;
+					penoffcnt = 0;
+				}
+				var arySplit3 = arySplit[index-1].trim();
+				var packet2 = arySplit3.split(/ /);
+				lasttimetmp = Number(packet2[7]);			// Last timestamp
+			}
+			if (arySplit[index].match(textMatch2)) {
+				lasttime += lasttimetmp;
+				console.log("lasttime: "+lasttime);
+			}
+			index++;
+		}
+		lasttime += lasttimetmp;
+		console.log("final lasttime: " + lasttime);
+		// Total number of packets
+		for (var i=0; i<pendowncnt; i++) pdpkttotal = pdpkttotal + strokeoncnt[i];
+		for (var i=0; i<penupcnt; i++) pupkttotal = pupkttotal + strokeoffcnt[i];
+		console.log("last time:" + lasttime);
+		totalpkt = pdpkttotal + pupkttotal;
+		testtime = Math.round(lasttime/1000);
+		//return (pdpkttotal + pupkttotal);	// total packet count
+	}
+	
+</script>
+									
+</body>
+</html>

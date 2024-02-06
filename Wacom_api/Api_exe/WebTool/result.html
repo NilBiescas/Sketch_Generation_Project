@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Web application sample for IoT Paper</title>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+</head>
+<link rel="stylesheet" href="./css/style.css">
+
+<body onload="stread()">
+
+<div id="textarea1">[ Pressure and speed over time ]</div>
+<div id="setsumei1" style="position:absolute; left:500px; top:5px; width:440;"> </div>
+<button type="button" id="endbtn" onclick="inkmlend()" style="position:absolute; left:300px; top:5px; width:160px; height:30px; background:orange;"> Close this window </button>
+<div><input type="range" id="inputSlideBar2" min="0" max="100" step="1" style="position:absolute; left:90px; top:600px; width:800px; z-index: 3000;"></div>
+<div id="slidetext" style="position:absolute; left:90px; top:620px;"> </div>
+<canvas id="canvas1" top="20" left="0" width="950px" height="600px"/>
+
+<script>
+	var slidevalue = 0;
+	//----------------------------------------------------
+	// Slider bar operation (progressdisp())
+	const inputSlideBarElement = document.getElementById('inputSlideBar2');
+	inputSlideBarElement.addEventListener('input', function(){
+		slidevalue = Number(inputSlideBarElement.value);
+		slidetext.style.left = (Math.round(cwidth * slidevalue /100) + g1orgx -10) + "px";
+		slidetext.innerText = Math.round(slidevalue * (totalpkt) / 100) + " pkt\n( " + slidevalue + " % )";
+		if (protd[Math.round(cwidth * slidevalue / 100)] == 1) slidetext.style.color = 'red';
+		else slidetext.style.color = 'burlywood';
+	});
+
+	//----------------------------------------------------
+	// Key operation (Enter key , Right / Left allow key)
+	document.addEventListener('keydown', function (e) {
+		let output = ``;
+		//let indx = 0;
+		if (e.keyCode === 13) {
+			inkmlend();
+			output = `Return`;
+		} else if (e.code == 'KeyA' || e.code == 'ArrowLeft') {
+			if (slidevalue > 0){
+				slidevalue = Number(inputSlideBarElement.value) - 1;
+				//indx = Math.round(cwidth * slidevalue / 100);
+				slidetext.style.left = (Math.round(cwidth * slidevalue /100) + g1orgx -10) + "px";
+				slidetext.innerText = Math.round(slidevalue * (totalpkt) / 100) + " pkt\n( " + slidevalue + " % )";
+				if (protd[Math.round(cwidth * slidevalue / 100)] == 1) slidetext.style.color = 'red';
+				else slidetext.style.color = 'burlywood';
+				inputSlideBarElement.value = slidevalue;
+				output = `Left`;
+			}
+		} else if (e.code == 'KeyD' || e.code == 'ArrowRight') {
+			if (slidevalue < 100) {
+				slidevalue = Number(inputSlideBarElement.value) + 1;
+				console.log("slide: "+slidevalue);
+				//indx = Math.round(cwidth * slidevalue / 100);
+				slidetext.style.left = (Math.round(cwidth * slidevalue /100) + g1orgx -10) + "px";
+				slidetext.innerText = Math.round(slidevalue * (totalpkt) / 100) + " pkt\n( " + slidevalue + " % )";
+				if (protd[Math.round(cwidth * slidevalue / 100)] == 1) slidetext.style.color = 'red';
+				else slidetext.style.color = 'burlywood';
+				inputSlideBarElement.value = slidevalue;
+				output = `Right`;
+			}
+		}
+		console.log(output + " " + slidevalue);
+	})
+
+	function stread1(){		// dummy (for debugging)
+		return;
+	}
+
+	//----------------------------------------------------
+	// Main process
+	function stread(){
+		var param = location.search;
+		slidevalue = param.substring(1, param.length);
+		console.log("param:" + slidevalue);
+		
+		getInkml();
+		inkmlpktcount();
+		var tss = lasttime / 1000;
+		document.getElementById('setsumei1').innerText = "Stroke=" + strokecnt + ",  Packet on=" + pdpkttotal + ", off=" + pupkttotal + "\nTotal time : " + tss + " (sec)";
+		showdata1();
+
+		slidetext.style.left = (Math.round(cwidth * slidevalue /100) + g1orgx -10) + "px";
+		slidetext.innerText = Math.round(slidevalue * (totalpkt) / 100) + " pkt\n( " + slidevalue + " % )";
+		//if (protd[Math.round(cwidth * slidevalue / 100)] == 1) slidetext.style.color = 'red';
+		if (protp[Math.round(cwidth * slidevalue / 100)] >= 0) slidetext.style.color = 'red';
+		else slidetext.style.color = 'burlywood';
+		inputSlideBarElement.value = slidevalue;
+	}
+
+	//----------------------------------------------------
+	// Close process 
+	function inkmlend(){
+		if (false)	// running on local host
+		if (window.opener != null) {
+			console.log("value:" + inputSlideBarElement.value);
+			window.opener.document.getElementById('inputSlideBar').value = inputSlideBarElement.value;
+			window.opener.progressdisp(inputSlideBarElement.value);
+		}
+		else alert("no parent");
+		window.close();		//}
+	}
+
+	//----------------------------------------------------
+	// Constant data for display
+	const xscale = 525 / 15725;		// X coordinate pixel scale
+	const yscale = 700 / 20967;		// Y coordinate pixel scale
+	const cwidth = 784;				// horizontal pixel of the graph
+	const cheight = 160;			// vertical  pixel of the graph
+	const g1orgx = 90;				// Graph 1 origin (left)
+	const g1orgy = 220;				//  (top)
+	const g2orgx = 90;				// Graph 2 origin (left)
+	const g2orgy = 500;				//  (top)
+	const spdpeak = 300;			// speed peak value of graph
+
+	let arySplit;					// inkml data
+
+	//----------------------------------------------------
+	// Read inkml data from local storage
+	function getInkml(){
+		var canvas = document.getElementById('canvas1');
+		canvas.style.visibility = "hidden";
+  		if (canvas.getContext) {
+    		var ctx = canvas.getContext('2d');
+			ctx.clearRect(0, 0, 1000, 700);
+		}
+		var str = JSON.parse(localStorage.getItem('key'))
+		var TextAry = str;
+	  	arySplit = TextAry.split(/,|\n/);
+		//alert(arySplit);
+	}
+
+
+	//----------------------------------------------------
+	// Display graph
+	function showdata1(){
+		var canvas = document.getElementById('canvas1');
+   		var ctx = canvas.getContext('2d');
+		canvas.style.visibility = "visible";
+		// graph 1 canvas initialize
+		ctx.font = '11px Roboto medium';
+		ctx.textAlign = "end";
+		ctx.textBaseline = "middle";
+		ctx.fillText('0 ', g1orgx-4, g1orgy);
+		ctx.fillText('2048', g1orgx-4, g1orgy-(cheight/2) );
+		ctx.fillText('4096', g1orgx-4, g1orgy-cheight );
+		ctx.fillText('Pressure:', g1orgx-4, g1orgy-cheight-20 );
+	    ctx.beginPath();
+		ctx.moveTo(g1orgx, g1orgy);
+	    ctx.lineTo((g1orgx + cwidth), g1orgy);
+		ctx.moveTo(g1orgx, g1orgy);
+	    ctx.lineTo(g1orgx, (g1orgy - cheight));
+	    ctx.closePath();
+	    ctx.stroke();
+		// graph 2 canvas initialize
+		ctx.fillText('0 mm/s', g2orgx-4, g2orgy);
+		ctx.fillText('150 mm/s', g2orgx-4, g2orgy-(cheight/2) );
+		ctx.fillText('300 mm/s', g2orgx-4, g2orgy-cheight );
+		ctx.fillText('Pen speed:', g1orgx-4, g2orgy-cheight-20 );
+	    ctx.beginPath();
+		ctx.moveTo(g2orgx, g2orgy);
+	    ctx.lineTo((g2orgx + cwidth), g2orgy);
+		ctx.moveTo(g2orgx, g2orgy);
+	    ctx.lineTo(g2orgx, (g2orgy - cheight));
+	    ctx.closePath();
+	    ctx.stroke();
+
+		// Editing from inkml data
+		inkmlRead();
+		
+		var gpwd = g1orgx;						// Horizontal position
+		var prexp = g1orgx; preyp = g1orgy;		// Start position of graph line
+		var prexs = g2orgx; preys = g2orgy;		// End position of graph line
+		var gpht = 0;							// Pressure offset
+		var gsht = 0;							// Speed offset
+		var gphtsave = 0;						// Previous value of pressure offset
+
+		// Pressure and Speed graph calculation
+		for (var i=0; i<(cwidth+2); i++) {
+			gpht = Math.round(protp[i] * cheight / 4096);
+			gsht = Math.round(prots[i] * cheight / spdpeak);
+			var wdt = Math.round(cwidth / totaldetect);
+			gpwd = g2orgx + i + 1;
+
+			// pressure
+			if (gphtsave < 0 && gpht >= 0) gpht = 0;
+			if (gphtsave > 0 && gpht <= 0) gpht = 0;
+			ctx.beginPath();
+			if (gphtsave < 0 || gpht < 0 ) ctx.strokeStyle = "burlywood";
+			else ctx.strokeStyle = "red";
+			ctx.lineWidth = 1;
+			ctx.moveTo( prexp, preyp);
+			ctx.lineTo( gpwd, g1orgy - gpht);
+			prexp = gpwd; preyp = g1orgy - gpht;
+		    ctx.closePath();
+			ctx.stroke();
+			// speed
+			ctx.beginPath();
+			//if (gphtsave < 0 || gpht < 0 ) ctx.strokeStyle = "aquamarine";
+			if ( i >0 && protd[i-1] ==0 ) ctx.strokeStyle = "aquamarine";
+			else ctx.strokeStyle = "blue";
+			ctx.lineWidth = 1;
+			ctx.moveTo( prexs, preys);
+			ctx.lineTo( gpwd, g2orgy - gsht);
+			prexs = gpwd; preys = g2orgy - gsht;
+		    ctx.closePath();
+		    ctx.stroke();
+		    
+		    gphtsave = gpht;
+		}
+	}
+
+	
+	//----------------------------------------------------
+	// Recording data for each stroke
+	var strokeavrs = new Array(400);		// each stroke speed average
+	var strokeavrp = new Array(400);		// each stroke pressure average
+	var strokeint = new Array(400);			// interval between strokes
+	var strokeoncnt = new Array(400);		// pen down packet count for each stroke
+	var strokeoffcnt = new Array(400);		// pen up packet count for each stroke
+	var strokestate = new Array(400);
+	var strokedown = new Array(400);
+	var strokeup = new Array(400);
+	var stroketime = Array(400);
+	var protp = Array(800);			// max 800!  (wide size of display area is set max 800px)
+	var prots = Array(800);			// max 800!
+	var protd = Array(800);			// max 800! pendown
+	//var proto = Array(800);		// max 800!
+
+	//----------------------------------------------------
+	var twrtotal = 0;		// total writing time	
+	var tpendown = 0;		// total pen down time
+	var maxspeed = 0;		// max stroke speed
+	var minspeed = 0;		// min stroke speed
+	var averagespd = 0;		// average of stroke speed
+	var averageprs = 0;		// average of pressure level
+	var maxpress = 0;		// max pressure level
+	var minpress = 0;		// min pressure level
+	var starttime = 0;		// first pen down timestamp
+	var lasttime = 0;		// time from start to stop (last timestamp)
+	var totaldetect = 0;	// pen down/up total count
+	var totalpkt = 0;
+
+	var pendowncnt = 0;		// stroke count of pen down
+	var penupcnt = 0;		// stroke count of pen up
+	var pdpkttotal = 0;		// pen down packet total
+	var pupkttotal = 0;		// pen up packet total
+	var strokecnt = 0;		// pen down stroke count
+	var protcnt = 0;		
+
+	//----------------------------------------------------
+	// Find the total number of packets and inkml data collection time
+	function inkmlpktcount() {
+	    var index = 0;
+	    var arySplit1, arySplit2;			// Work for read XML strings
+
+		let textMatch0 = "</";
+		let textMatch1 = "</paper";
+		let textMatch2 = "</inkml:definitions>";
+		let x0 , x1, y0, y1;				// for calculating speed 
+		let penon = 0;						// pen tip mode : pen down stroke is "1"
+		let penoncnt = 0;					// packet count in 1 stroke (pen down)
+		let penoffcnt = 0;					// packet count in 1 stroke (pen up)
+		let lasttimetmp = 0;
+		var tcnt = 0;
+
+		// decode start ---
+		pdpkttotal = 0;	
+		pupkttotal = 0;	
+		pendowncnt = 0;
+		penupcnt = 0;
+		strokecnt = 0;
+		index = 0;
+		console.log("* Inkml check Start *");
+		while (!arySplit[index].match(textMatch1)) {
+			if (arySplit[index].match(/<inkml:trace /)){
+				if (arySplit[index].match(/penDown/)) {
+					penon = 1;
+					strokestate[tcnt] = 1;
+				}
+				else {
+					penon = 0;
+					strokestate[tcnt] = 2;
+				}				
+				tcnt++;
+
+	  			arySplit1 = arySplit[index].trim();
+	  			arySplit2 = arySplit1.split(/\s/);
+
+				index++;
+				while (!arySplit[index].match(/inkml:trace>/)){ 
+		  			arySplit1 = arySplit[index].trim();
+					if (penon == 1){
+						penoncnt++;
+					} else {
+						penoffcnt++;
+					}
+					index++;		// next packet check...
+				}
+				// one stroke end
+
+				var laststr = arySplit[index-1].substring(arySplit[index-1].length-9);	// Get timeStamp of the last packet
+				if (penon == 1){
+					strokeoncnt[pendowncnt] = penoncnt;		// save packet count in 1 stroke (pen down)
+					if (pendowncnt<400) pendowncnt++;
+					penoncnt = 0;
+				}
+				else {
+					strokeoffcnt[penupcnt] = penoffcnt;		// save packet count in 1 stroke (pen up)
+					if (penupcnt<400) penupcnt++;
+					penoffcnt = 0;
+				}
+				var arySplit3 = arySplit[index-1].trim();
+				var packet2 = arySplit3.split(/ /);
+				lasttimetmp = Number(packet2[7]);			// Last timestamp
+				if (penon == 1) strokecnt++;
+				// End one stroke process -----
+			}
+			if (arySplit[index].match(textMatch2)) {
+				lasttime += lasttimetmp;
+			}
+			index++;
+		}
+		lasttime += lasttimetmp;
+		console.log("last time:" + lasttime);
+		// Total pakets
+		for (var i=0; i<pendowncnt; i++) pdpkttotal = pdpkttotal + strokeoncnt[i];
+		for (var i=0; i<penupcnt; i++) pupkttotal = pupkttotal + strokeoffcnt[i];
+		totalpkt = pdpkttotal + pupkttotal;
+		console.log("total packet:" + totalpkt);
+	}
+
+	//----------------------------------------------------
+	// Read the pen pressure and speed from the tablet packet data of the inkml data,
+	// calculate the numerical values for graphing according to the display range, 
+	// and store them in prots (speed) and protp (pen pressure).
+	function inkmlRead(){
+
+		let textMatch0 = "</";
+		let textMatch1 = "</paper";
+		let pdcnt = 0;					// pen down count on this page
+		let wrtlasttime = 0;			// timestamp of last pen down
+		let pdtotaltime = 0;			// total pen down time
+		let laststr = "0";				// the latest timestamp
+		let x0 , x1, y0, y1;			// for line drawing
+		let spdavr = 0;					// work for getting speed average
+		let maxspd = 0;					// max value of speed average in 1 stroke
+		let minspd = 1000;				// min value of speed average in 1 stroke
+		let prsavr = 0;					// work foe getting pressure average
+		let maxprs = 0;					// max value of pressure average in 1 stroke
+		let minprs = 4096;				// min value of pressure average in 1 stroke
+		
+		let maxspdoff = 0;				// max value of pen off speed average in 1 stroke
+		let minspdoff = 1000;			// min value of pen off speed average in 1 stroke
+		//let heightavr = 0;				// average of height
+		let maxheight = 0;				// max value of height average in 1 stroke
+		let minheight = 256;			// min value of height average in 1 stroke
+		let toffset = 0;
+
+		// initialize
+		let tinterval = (lasttime / cwidth);	// time distance for making graph
+		console.log("interval:" + tinterval);
+		let pktinterval = totalpkt / cwidth;	// packet distance : tentative
+		
+		
+		for (var i=0; i<800; i++) { protp[i] = 0; prots[i] = 0; }
+		protcnt = 0;
+
+		// decode start ---
+		let index = 0;
+		var speed1 = 0;
+		var speed2 = 0;
+		var cpktcnt = 0;
+
+		console.log("* Inkml Decode Start *");
+		while (!arySplit[index].match(textMatch1)) {
+			if (arySplit[index].match(/<inkml:trace /)){
+				var penon = 0;
+				if (arySplit[index].match(/penDown/)) penon = 1;
+				else penon = 0;
+	  			var arySplit1 = arySplit[index].trim();
+	  			var arySplit2 = arySplit1.split(/\s/);
+	  			//get start time from "timeOffset"
+				var timeofs = Number(arySplit2[3].substring(12,arySplit2[3].length-1)); 
+				if (totaldetect == 0) starttime = timeofs;
+				var packetcnt = 0;
+				var speed = 0;
+				var press = 0;
+				var penoffcnt = 0;				// packet count in 1 stroke (pen up)
+				var height = 0;
+				strokedown[totaldetect] = timeofs;
+				
+				// Start stroke data process ---
+				index++;
+				while (!arySplit[index].match(/inkml:trace>/)){ 
+		  			arySplit1 = arySplit[index].trim();
+					if (penon == 1){	// Pen down
+						var packet = arySplit1.split(/ /);
+						if (protcnt == 0) {									// First packt receive
+							//console.log("*** pen on start");
+							x1 = packet[0]; x0 = x1;
+							y1 = packet[1]; y0 = y1;
+							var timesave = toffset + Number(packet[7]);
+							var pressave = Number(packet[2]);
+
+							if (totalpkt > cwidth){
+								//if (timesave >= (tinterval * protcnt)){
+								if (cpktcnt >= (pktinterval * protcnt)){	// tentative!!
+									protp[protcnt] = pressave ;
+									protd[protcnt] = 1 ;
+									protcnt++;
+								} 
+							} else {
+								//while (timesave >= (tinterval * protcnt)){
+								while (cpktcnt >= (pktinterval * protcnt)){	// tentative!!
+									protp[protcnt+1] = protp[protcnt];
+									protd[protcnt+1] = protd[protcnt];
+									protcnt++;
+								}
+								protp[protcnt] = pressave;
+								protd[protcnt] = 1 ;
+							}
+						} else {											// After 2nd paket receive
+							x0 = packet[0];
+							y0 = packet[1];
+							speed2 = speed1; // save previous value
+						    speed1 = Math.round(Math.sqrt(Math.pow(x0-x1, 2) + Math.pow(y0-y1, 2)) *10/ 3);
+							if (speed1 == 0) speed1 = speed2;
+							var timesave = toffset + Number(packet[7]);
+							var pressave = Number(packet[2]);
+
+							if (totalpkt > cwidth){
+								//if (timesave >= (tinterval * protcnt)){
+								if (cpktcnt >= (pktinterval * protcnt)){	// tentative!!
+									protp[protcnt] = pressave;
+									prots[protcnt] = speed1;
+									protd[protcnt] = 1;
+									protcnt++;
+								}
+							} else {
+								//while (timesave >= (tinterval * protcnt)){
+								while (cpktcnt >= (pktinterval * protcnt)){	// tentative!!
+									protp[protcnt+1] = protp[protcnt];
+									prots[protcnt+1] = prots[protcnt];
+									protd[protcnt+1] = protd[protcnt];
+									protcnt++;
+								}
+								protp[protcnt] = pressave;
+								prots[protcnt] = speed1;
+								protd[protcnt] = 1;
+							}
+														
+							if (maxspd < speed1) maxspd = speed1;		// Save maximum speed
+							if (minspd > speed1) minspd = speed1;		// Save minimum speed
+							speed = speed + speed1;						// sum of speed in this stroke
+							var press1 = Number(packet[2]);
+							if (maxprs < press1) maxprs = press1;		// Save maximum pressure
+							if (minprs > press1) minprs = press1;		// Save minimum pressure
+							press = press + press1;						// sum of pressure in this stroke
+							x1 = x0;
+							y1 = y0;
+						}
+					} else { // Pen hovering
+						var packet = arySplit1.split(/ /);
+						if (penoffcnt < 2) {							// dummy read
+							x1 = packet[0];
+							y1 = packet[1];
+							var timesave = toffset + Number(packet[7]);
+							var heightsave = Number(packet[3]*20);
+						} else {
+							x0 = packet[0];
+							y0 = packet[1];
+							// hovering speed recording
+							speed2 = speed1; // save previous value
+						    speed1 = Math.round(Math.sqrt(Math.pow(x0-x1, 2) + Math.pow(y0-y1, 2)) *10/ 3);
+							if (speed1 == 0) speed1 = speed2;
+							var timesave = toffset + Number(packet[7]);
+							var heightsave = Number(packet[3]*20);
+
+							if (totalpkt > cwidth){
+								//if (timesave >= (tinterval * protcnt)){
+								if (cpktcnt >= (pktinterval * protcnt)){	// tentative!!
+									protp[protcnt] = heightsave;
+									prots[protcnt] = speed1;
+									protd[protcnt] = 0;
+									protcnt++;
+								}
+							} else {
+								//while (timesave >= (tinterval * protcnt)){
+								while (cpktcnt >= (pktinterval * protcnt)){	// tentative!!
+									protp[protcnt+1] = protp[protcnt];
+									prots[protcnt+1] = prots[protcnt];
+									protd[protcnt+1] = protd[protcnt];
+									protcnt++;
+								}
+								protp[protcnt] = heightsave;
+								prots[protcnt] = speed1;
+								protd[protcnt] = 0;
+							}
+							if (maxspdoff < speed1) maxspdoff = speed1;		// Save maximum speed
+							if (minspdoff > speed1) minspdoff = speed1;		// Save minimum speed
+							//speed = speed + speed1;						// sum of speed in this stroke
+							var height1 = - Number(packet[3]);
+							if (maxheight < height1) maxheight = height1;	// Save maximum height
+							if (minheight > height1) minheight = height1;	// Save minimum height
+							height = height + height1;						// sum of height in this stroke
+							x1 = x0;
+							y1 = y0;
+						}
+						penoffcnt++;
+					}
+					// pen down stroke end
+					cpktcnt++;
+					index++;
+					if (penon == 1) packetcnt++;
+				}
+				// Process for one stroke ----
+				arySplit1 = arySplit[index-1].trim();
+				var packet2 = arySplit1.split(/ /);
+				laststr = packet2[7];										// Last timestamp
+				if (penon == 1){
+					var speedtmp = speed / (packetcnt);						// Speed average for each stroke
+					strokeavrs[pdcnt] = Math.round(speedtmp);
+					spdavr = spdavr + speedtmp;								// Sum of speed average for each stroke
+					//console.log("prs:" + press + " cnt:" + packetcnt);
+					var presstmp = Math.round(press / packetcnt);
+					strokeavrp[pdcnt] = Math.round(presstmp);
+					prsavr = prsavr + presstmp;								// Sum of pressure average for each stroke
+					strokeint[pdcnt] = timeofs - wrtlasttime;
+					wrtlasttime = toffset + Number(laststr);				// pendown last time
+					if (pdcnt < 400) 										// 200 stroke (current limit)
+						pdcnt++;
+					pdtotaltime = pdtotaltime + (wrtlasttime - timeofs);	// Sum of total time of pen down
+				}
+				strokeup[totaldetect] = toffset + Number(laststr);
+				stroketime[totaldetect] = strokeup[totaldetect] - strokedown[totaldetect];
+				totaldetect++;
+			}
+			if (arySplit[index].match(/<inkml:definitions/)){
+				toffset += Number(laststr);
+				console.log("ofs:" + toffset);
+			}
+			index++;
+		}
+		if(pdcnt>0) {
+			averagespd = Math.round(spdavr / pdcnt);
+			averageprs = Math.round(prsavr / pdcnt);
+		}
+		else {
+			averagespd = 0;
+			averageprs = 0;
+		}
+		strokecnt = pdcnt;					// pen down count
+		tpendown = pdtotaltime;				// sum of pen down time
+		twrtotal = toffset + Number(laststr);			// change to binary for the last time stamp
+		twrtotal = twrtotal - starttime;
+		console.log("total time:" + twrtotal + "  last:" + Number(laststr));
+		maxspeed = Math.round(maxspd);		// Maximum speed in this page
+		maxpress = maxprs;
+		if (minspd == 1000) minspd = 0;		// if no stroke...
+		if (minprs == 4096) minprs = 0;		// if no stroke...
+		minspeed = Math.round(minspd);		// minimum speed in this page
+		minpress = minprs;
+	}
+
+</script>
+</body>
+</html>

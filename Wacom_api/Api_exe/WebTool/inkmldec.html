@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<!-- saved from url=(0050)https://patrickhlauke.github.io/touch/pen-tracker/ -->
+<!-- Pointer Events - pen with tilt and pressure tracker (WebGL)
+     refer from http://patrickhlauke.github.io/touch/ -->
+
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>IoT Paper Inkml decorder (WebGL)</title>
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r71/three.min.js"></script> -->
+<script src="./tracker_files/three_r71.min.js"></script>
+<script src="./tracker_files/OrbitControls.js"></script>
+<style>
+	body { touch-action: none; margin: 0; padding: 0; overflow: hidden; }
+	body, body * { user-select: none; -webkit-user-select: none; }
+</style>
+</head>
+
+<body>
+
+<button type="button" id="endbtn" onclick="inkmlend()" style="position:absolute; left:200px; top:0px; width:160px; height:30px; background:orange;"> Close this window </button>
+
+<script>
+
+	init();
+	animate();
+	decodestart();
+
+
+	var camera, controls, scene, renderer, stylusObject, pressurePad, tiltX, tiltY, newTiltX, newTiltY;
+	var azimuth, altitude, newAzimuth, newAltitude, useTilt;
+	var line1;
+
+	// line width set for supporting pressure 9/29
+	const line_material1 = new THREE.LineBasicMaterial( { color: 0x3333ff, linewidth: 1 } ); //Brue
+	const line_material2 = new THREE.LineBasicMaterial( { color: 0x1616ff, linewidth: 3 } ); //Cyan Brue
+	const line_material3 = new THREE.LineBasicMaterial( { color: 0x0808ff, linewidth: 5 } ); //Dark Brue
+	const line_material4 = new THREE.LineBasicMaterial( { color: 0x08ff08, linewidth: 10 } ); //Green
+	var material2 = new THREE.LineBasicMaterial({ vertexColors: THREE.VertexColors });
+	var geometryLine = new THREE.Geometry();
+	var drawLine = new THREE.Line( geometryLine, line_material1, THREE.LinePieces  );
+	var decode = 0;
+
+	var bufferAray = [];
+
+	//document.getElementById('endbtn').style.visibility = "visible";
+	
+	document.addEventListener('keydown', function (e) {
+		//alert("key down detect");
+		if (e.keyCode === 13) {
+			inkmlend();
+		}
+	})
+
+function decodestart() {
+	var str = JSON.parse(localStorage.getItem('key'))
+	var TextAry = str;
+
+
+  	var arySplit = TextAry.split(/,|\n/);
+    var index = 0;
+    var arySplit1, arySplit2;			//XML文字列の格納用
+    var xImax, yImax, xResmax, yResmax;	//IoT Paperのプロパティ
+    var aspect = 0, drawCount = 0;
+    var xNew = 0, yNew = 0, xOld = 0, yOld = 0;
+    var xTilt, yTilt, penType = 0, firstTip = 0;
+	var imageBmp, imageBmp2;
+    var decodeType = 0; // according to the tag
+    var decodemode = 0;
+    var nodatacount = 0;
+	var textmatch1 = "/resource>";
+    
+	// Scene の初期化 2022.04.29
+	//if (decode != 0) 
+	//	scene.remove(plane1);
+
+    while (decodeType < 3) {
+		if (arySplit[index].match(/paper>/)) {  //if end
+            console.log("this file contains no trace data")
+			break;
+		}
+	    if (arySplit[index].match(/<resource>/)) {
+			//画像リソースの読み込み (base64)
+	    	index++;
+	    	if (arySplit[index].match(/<templateImage/)) {
+	    		console.log("1. Found Base64 image");
+	    		index++;
+	    	    imageBmp = arySplit[index].trim();
+	    		imageBmp2 = 'data:image/bmp;base64,' + imageBmp;
+			}
+			while (!(arySplit[index].match(textmatch1))) {  //画像リソース終わりまでスキップ
+				index++;
+			}
+	        decodeType = 1; // Image Decode End
+		}
+	    if (arySplit[index].match(/<inkml:canvas/)) {
+			//キャンバス情報（画像サイズ）
+			index++;
+			if (arySplit[index].match(/<inkml:traceFormat>/)) {
+				// Get image size
+				index++;			//inkml:channel X
+				arySplit[index] = arySplit[index].trim();
+				arySplit1 = arySplit[index].split(/\s/);
+				arySplit2 = (arySplit1[3].match(/\D+(\d+)/));
+				xImax = Number(arySplit2[1]);
+				index++;			//inkml:channel Y
+				arySplit[index] = arySplit[index].trim();
+				arySplit1 = arySplit[index].split(/\s/);
+				arySplit2 = (arySplit1[3].match(/\D+(\d+)/));
+				yImax = Number(arySplit2[1]);
+
+				// 2D image texture mapping
+				var image = new Image();
+				image.src = imageBmp2
+				var texture = new THREE.Texture( image );
+				texture.needsUpdate = true;
+				var planeGeometry = new THREE.PlaneBufferGeometry(xImax,yImax,1,1);
+				var planeMaterial = new THREE.MeshBasicMaterial({ map: texture });
+				var plane1 = new THREE.Mesh(planeGeometry, planeMaterial);
+				rotateAroundWorldAxis( plane1, new THREE.Vector3( 1, 0, 0 ) , 270 * Math.PI / 180 );
+				plane1.position.y = -76;
+				line1.visible = false;
+				scene.add( plane1 );  // add 3D image
+
+				console.log("1. X Image size:" + xImax + ", Y Image size:" + yImax + ", W:" + window.innerWidth + ", H:" + window.innerHeight);
+			}
+			//decodeType = 3; // canvas data read end
+        }
+		if (arySplit[index].match(/<inkml:context/)) {
+			//タブレット情報（最大座標）
+			index++;
+			while (!(arySplit[index].match(/<inkml:traceFormat>/))) {
+				//traceFormatタグが見つかるまでスキップ
+				index++;
+			}
+			index++;			//inkml:channel X
+			arySplit[index] = arySplit[index].trim();
+			arySplit1 = arySplit[index].split(/\s/);
+			arySplit2 = (arySplit1[3].match(/(\d+).(\d+)/));
+			xResmax = Number(arySplit2[1] + arySplit2[2]);
+			index++;			//inkml:channel Y
+			arySplit[index] = arySplit[index].trim();
+			arySplit1 = arySplit[index].split(/\s/);
+			arySplit2 = (arySplit1[3].match(/(\d+).(\d+)/));
+			yResmax = Number(arySplit2[1] + arySplit2[2]);
+			if (xResmax >= yResmax) aspect = 1;
+
+            decodeType =4; // pen context read end
+			console.log("1. Found context: X Res:" + xResmax + ", Y Res:" + yResmax + ", Aspect:" + aspect + "  " + index);
+       	}
+	    index++;
+    }
+    sleep(700); // wait for image reading
+            
+	var timeCnt = 0;
+	console.log("2. start trace, " + decodeType);
+
+    var date = new Date();	
+	var Hour = date.getHours();
+	var Min = date.getMinutes();
+	var Sec = date.getSeconds();
+	var Msec = date.getMilliseconds();
+	console.log("Start = " + Hour + ":" + Min + ":" + Sec + ":" + Msec);
+
+	// for over load testing
+	var timeMsec=0, timePreMs=0, timePre1=0, timeSec=0, timePreS=0, timePre2=0;
+	timePreMs = Msec; timePreS = Sec;
+
+	// Draw line each 4msec interval
+    var timerId = setInterval(function(){
+
+		// if find inkml data end, then timer stop
+		if (arySplit[index].match(/paper>/)) {
+			console.log("Decode end  " + index + " line");
+			clearInterval(timerId);
+			date = new Date();
+			Hour = date.getHours();
+			Min = date.getMinutes();
+			Sec = date.getSeconds();
+			Msec = date.getMilliseconds();
+			console.log("Finish = " + Hour + ":" + Min + ":" + Sec + ":" + Msec);
+			timePreMs = Msec; timePreM = Sec;
+			//alert("Finish = " + Hour + ":" + Min + ":" + Sec + ":" + Msec);
+        }
+
+	        if (arySplit[index].match(/<inkml:trace /)) {
+	            decodemode = 1;
+	            //console.log("Inkml trace start " + index);
+				if 	(arySplit[index].match(/eraser/)) {
+					if (penType==0) console.log("* changed to Eraser  " + index);
+					penType = 1;
+				} else {
+					if (penType==1) console.log("* changed to Pen tip  " + index);
+					penType = 0;
+				}
+	        } else if (arySplit[index].match(/inkml:trace>/)) {
+				decode = 1; // for test 4.29
+	            decodemode = 0;
+			} else if (decodemode >> 0){    	
+				// Drawing line
+	  			arySplit[index] = arySplit[index].trim();
+	  			var arySplit3 = arySplit[index].split(/\s/);
+				var aspectRatio = xResmax / xImax;
+		  		xNew = (arySplit3[0]/aspectRatio) - (xImax/2);
+		  		yNew = (arySplit3[1]/aspectRatio) - (yImax/2);
+		  		xTilt = (arySplit3[4]/100);
+				if (aspect == 1) {  				// only Y tilt is different
+		  			yTilt = (arySplit3[5]/100)
+		  		} else {
+		  			yTilt = -(arySplit3[5]/100);
+				}
+				InkmlPointer(xNew, yNew, (arySplit3[2]/4096),(arySplit3[3]/1.5 |0),xTilt,yTilt);
+				
+				if (arySplit3[2] > 0) {				// When pressure ON
+					if (firstTip == 0) {
+						firstTip = 1;				// Ignore first contact line.
+					} else {
+						bufferAray[4*drawCount+0] = xOld;
+						bufferAray[4*drawCount+1] = yOld;
+						bufferAray[4*drawCount+2] = xNew;
+						bufferAray[4*drawCount+3] = yNew;
+						if (drawCount > 10) {						// draw start when 10 point coordinates are stored
+							geometryLine = new THREE.Geometry();	// for reduce GPU(CPU) load
+							for (i=0; i <= drawCount; i++) {
+								geometryLine.vertices.push( new THREE.Vector3( bufferAray[(4*i)], -75, bufferAray[(4*i)+1] ));
+								geometryLine.vertices.push( new THREE.Vector3( bufferAray[(4*i)+2], -75, bufferAray[(4*i)+3] ));
+							}
+							if (penType == 0) {	//Pen tip
+								drawLine = new THREE.Line( geometryLine, line_material1, THREE.LinePieces  );
+							} else {			//Eraser
+								drawLine = new THREE.Line( geometryLine, line_material4, THREE.LinePieces  );
+							}
+							scene.add( drawLine );
+							drawCount = 0;
+						} else { drawCount = drawCount + 1; }
+					}
+				} else {
+					if (drawCount > 0) {
+						geometryLine = new THREE.Geometry();
+						for (i=0; i <= drawCount; i++) {
+							geometryLine.vertices.push( new THREE.Vector3( bufferAray[(4*i)], -75, bufferAray[(4*i)+1] ) );
+							geometryLine.vertices.push( new THREE.Vector3( bufferAray[(4*i)+2], -75, bufferAray[(4*i)+3] ) );
+						}
+						if (penType == 0) {
+							drawLine = new THREE.Line( geometryLine, line_material1, THREE.LinePieces  );
+						} else {
+							drawLine = new THREE.Line( geometryLine, line_material2, THREE.LinePieces  );
+						}
+						scene.add( drawLine );
+					}
+					firstTip = 0;
+					drawCount = 0;
+				}
+				xOld = xNew;
+				yOld = yNew;
+    	    }
+	    	index++;
+
+			// for over load test
+			if (timeCnt++ > 250) {
+				date = new Date();
+				timeSec = date.getSeconds();
+				timePre2 = timeSec;
+				timeMsec = date.getMilliseconds();
+				timePre1 = timeMsec;
+
+				if (timeSec < timePreS )
+					timeSec = timeSec + 60;
+				timeMsec = timeMsec + ((timeSec - timePreS - 1) * 1000);
+				//console.log("1sec (250 scan) past, " + (timeMsec - timePreMs) + " ms over");
+				timePreMs = timePre1;
+				timePreS = timePre2;
+				timeCnt = 0;
+			}
+	},3);
+}
+
+
+function inkmlend(){
+	window.close();
+}
+
+function sleep(waitMsec){
+	var startMsec = new Date();
+	while (new Date() - startMsec -waitMsec);
+}
+
+function useTiltOrAzimuthAltitudeForRotation(){
+	const queryString = window.location.search;
+	const urlParams = new URLSearchParams(queryString);
+	return urlParams.has('azimuth')?'use_azimuth':'use_tilt';
+}
+
+function init() {
+	// Basic setup
+	renderer = new THREE.WebGLRenderer( { antialias: true } );
+	renderer.setPixelRatio( window.devicePixelRatio );
+	renderer.setSize( window.innerWidth, window.innerHeight );
+	renderer.setClearColor(0xdddddd, 1);
+	document.body.appendChild( renderer.domElement );
+
+	// Camera
+	camera = new THREE.PerspectiveCamera( 90, window.innerWidth / window.innerHeight, 1, 2000 );
+	camera.position.x = 0; //300;
+	camera.position.y = 1200; //400;
+	camera.position.z = 400; //1200;
+
+	// Controls
+	controls = new THREE.OrbitControls( camera );
+	controls.damping = 0.2;
+	controls.addEventListener( 'change', render );
+
+	// Scene setup
+	scene = new THREE.Scene();
+
+	// Grid
+	var line_material = new THREE.LineBasicMaterial( { color: 0x808080 } ),
+		geometry = new THREE.Geometry(),
+		floor = -75, step = 25;
+	for ( var i = 0; i <= 40; i ++ ) {
+		geometry.vertices.push( new THREE.Vector3( - 500, floor, i * step - 500 ) );
+		geometry.vertices.push( new THREE.Vector3(   500, floor, i * step - 500 ) );
+		geometry.vertices.push( new THREE.Vector3( i * step - 500, floor, -500 ) );
+		geometry.vertices.push( new THREE.Vector3( i * step - 500, floor,  500 ) );
+	}
+
+	line1 = new THREE.Line( geometry, line_material, THREE.LinePieces );
+	scene.add( line1 );
+
+	// Pressure indicator
+	var pad_material = new THREE.LineBasicMaterial( { color: 0xff88ee } ),
+		circleGeometry = new THREE.CircleGeometry( 100, 40 );
+	pressurePad = new THREE.Mesh( circleGeometry, pad_material );
+	pressurePad.material.side = THREE.DoubleSide;
+	pressurePad.material.opacity = 0.7;
+	pressurePad.material.transparent = true;
+	rotateAroundWorldAxis( pressurePad, new THREE.Vector3( 1, 0, 0 ) , 270 * Math.PI / 180 );
+	pressurePad.position.y = -74;
+	pressurePad.visible = false;
+	scene.add( pressurePad );
+
+	// stylusObject
+	var material = new THREE.MeshPhongMaterial( { color: 0xffffff, specular: 0xffffff, shininess: 5, shading: THREE.FlatShading } );
+
+	var barrel = new THREE.CylinderGeometry( 10, 10, 250, 40 );
+	var mesh = new THREE.Mesh( barrel, material );
+	mesh.position.y = 165;
+	var cone = new THREE.CylinderGeometry( 10, 0, 40, 40 );
+	var mesh2 = new THREE.Mesh( cone, material );
+	mesh2.position.y = 20;
+	stylusObject = new THREE.Object3D();
+	stylusObject.add( mesh );
+	stylusObject.add( mesh2 );
+	stylusObject.position.y = -40;
+	stylusObject.visible = false;
+	scene.add( stylusObject );
+	tiltX = 0;
+	tiltY = 0;
+	newTiltX = 0;
+	newTiltY = 0;
+	var untrustedPointerEvent = new PointerEvent('pointermove');	
+	useTilt = (untrustedPointerEvent.azimuthAngle === undefined) || (useTiltOrAzimuthAltitudeForRotation() === 'use_tilt');
+	azimuth = 0;
+	altitude = Math.PI/2;
+	newAzimuth = 0;
+	newAltitude = Math.PI/2;
+
+	// Lights
+	scene.add( new THREE.AmbientLight( 0x111111 ) );
+	var directionalLight = new THREE.DirectionalLight( 0xffffff, 0.5 );
+	directionalLight.position.x = 1;
+	directionalLight.position.y = 1;
+	directionalLight.position.z = 10;
+	directionalLight.position.normalize();
+	scene.add( directionalLight );
+
+	// Listeners
+	window.addEventListener( 'resize', onWindowResize, false );
+	var webglcanvas = document.getElementsByTagName('canvas')[0];
+	webglcanvas.addEventListener('contextmenu', function(e) { e.preventDefault(); }, true);
+}
+
+function onWindowResize() {
+	camera.aspect = window.innerWidth / window.innerHeight;
+	camera.updateProjectionMatrix();
+	renderer.setSize( window.innerWidth, window.innerHeight );
+}
+
+function InkmlPointer(xx,yy,prs,hh,tx,ty) {
+	// only react to *primary* pen/stylus (as we're only drawing a single 3D pen)
+	controls.enabled = false;
+
+	stylusObject.position.y = -75 - hh;
+	stylusObject.visible = true;
+	pressurePad.visible = true;	
+	// simplified implementation: only one pen/stylus (the primary) - otherwise,
+	// we'd really need multiple objects and build an array/collection of pointers
+	newTiltX = -tx;
+	//newTiltY = ty;
+	newTiltY = -ty;
+	stylusObject.position.x = pressurePad.position.x = xx ;
+	stylusObject.position.z = pressurePad.position.z = yy;
+	pressurePad.scale.x = (prs > 0.03) ? prs : 0.03;
+	pressurePad.scale.y = (prs > 0.03) ? prs : 0.03;
+
+	controls.enabled = true;
+}
+
+function animate() {
+	requestAnimationFrame( animate );
+	// doing rotations on animation frame, rather than directly on pointermove,
+	// as they are more expensive to calculate, involving matrix transformations
+
+	if(useTilt){ 
+	  // reset - to avoid complex calculation, simply rotate the object back to its original position
+	  rotateAroundWorldAxis( stylusObject, new THREE.Vector3( 0, 0, 1 ) , -tiltX * Math.PI / 180 );
+	  rotateAroundWorldAxis( stylusObject, new THREE.Vector3( 1, 0, 0 ) , -tiltY * Math.PI / 180 );
+	}else{
+	  // reset - to avoid complex calculation, simply rotate the object back to its original position
+	  // Keep in mind that the Z and Y axis are interchanged
+	  // myX== X 
+	  // myY == Z 
+	  // myZ == Y
+	  // altitude is a rotation with myY ( Z )
+	  // azimuth is a rotation with myZ  ( Y )
+	  var backRotation = new THREE.Euler(0, -azimuth, -altitude, 'ZYX');
+	  rotateByEulerAngle(stylusObject, backRotation);		
+	}
+	// update axis with the new tiltX/tiltY
+	// note: Pointer Events tiltX/tiltY are in degrees, not radians
+	// and the axes for tiltX/tiltY are different in relation to the standard three.js world,
+	// hence the weird mapping of tiltY to the world's x axis and tiltX to the world's z axis
+	tiltX = newTiltX;
+	tiltY = newTiltY;
+	if(useTilt){
+	  rotateAroundWorldAxis( stylusObject, new THREE.Vector3( 1, 0, 0 ) , tiltY * Math.PI / 180 );
+	  rotateAroundWorldAxis( stylusObject, new THREE.Vector3( 0, 0, 1 ) , tiltX * Math.PI / 180 );
+	}else{
+	  azimuth = newAzimuth;
+	  altitude= newAltitude;
+	  // altitude is a rotation with myY ( Z )
+	  // azimuth is a rotation with myZ  ( Y )
+	  var forwardRotation = new THREE.Euler(0, azimuth, altitude, 'YZX');
+	  rotateByEulerAngle(stylusObject, forwardRotation);
+	}
+	render();
+}
+
+function render() {
+	renderer.render( scene, camera );
+}
+
+// Helper function to rotate an object around an arbitrary axis in world space 
+
+function rotateAroundWorldAxis(object, axis, radians) {
+    var rotWorldMatrix = new THREE.Matrix4();
+    rotWorldMatrix.makeRotationAxis( axis.normalize(), radians );
+    rotWorldMatrix.multiply( object.matrix ); // pre-multiply
+    object.matrix = rotWorldMatrix;
+    object.rotation.setFromRotationMatrix( object.matrix );
+}
+
+// helper function to rotate an object using an euler angle
+
+function rotateByEulerAngle(object, euler){
+	var rotMatrix = new THREE.Matrix4();
+	rotMatrix.makeRotationFromEuler(euler);
+	rotMatrix.multiply(object.matrix);
+	object.matrix = rotMatrix;
+	object.rotation.setFromRotationMatrix(object.matrix);
+}
+</script>
+
+<canvas width="2229" height="1051" style="width: 1274px; height: 601px;"></canvas>
+
+</body></html>
