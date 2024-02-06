@@ -8,6 +8,7 @@ from argparse import ArgumentParser
 from base64 import b64encode
 from pathlib import Path
 from PIL import Image, ImageOps
+import subprocess
 
 class Convert2BMP:
     def __init__(self, path:Path) -> None:
@@ -71,15 +72,31 @@ class Convert2BMP:
             f_out.write(full)
 
         print("succesfully generated in: ", target)
-    
-if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument("--source", type=Path, help="source image file")
-    args = parser.parse_args()
-    path = args.source
-    filename = path.name.split(".")[0]
 
+
+
+def create_inkml_file(path:Path, filename) -> None:
     obj = Convert2BMP(path)
-    obj._BMP2INKML(filename)
+    obj._BMP2INKML(filename=filename)
+    
+    # Run the exe file from the Wacom api
+    path_to_exe = Path('Wacom_api/Api_exe/InkmlSample.exe')
+    result = subprocess.run([path_to_exe], capture_output=True, text=True)
+    if result != 0:
+        print("Error running the exe file")
+        exit(result.returncode)
+    
     obj._BMP2PNG()
+    print("PNG file from the Wacom api generated !!")
+
+#if __name__ == "__main__":
+#    parser = ArgumentParser()
+#    parser.add_argument("--source", type=Path, help="source image file")
+#    args = parser.parse_args()
+#    path = args.source
+#    filename = path.name.split(".")[0]
+#
+#    obj = Convert2BMP(path)
+#    obj._BMP2INKML(filename)
+#    obj._BMP2PNG()
     
