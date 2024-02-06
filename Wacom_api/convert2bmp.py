@@ -1,6 +1,4 @@
 ## custom classes
-
-
 ## general classes
 import os
 
@@ -57,6 +55,7 @@ class Convert2BMP:
         self._Convert2BMP()
         path_bmp = self._path.with_suffix('.bmp')
         BMP_file = self.BMP_FOLDER / path_bmp.name
+
         try:
             with open(BMP_file, "rb") as f_in:
                 data = f_in.read()
@@ -83,5 +82,4 @@ if __name__ == "__main__":
     obj = Convert2BMP(path)
     obj._BMP2INKML(filename)
     obj._BMP2PNG()
-    
     
