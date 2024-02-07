@@ -83,9 +83,9 @@ if __name__ == '__main__':
     
     create_inkml_file(path=path, filename=filename)
 
-    receive_image('/home/GROUP04/IMG_FROM_LOCAL/Sketch_output/cervell.png', 
-           '/home/nbiescas/Desktop/Sketch_Generation_Project', 
-           '158.109.8.116', 
-           '22345',
-           'GROUP04', 
-           'weareop')
+    send_image(local_image_path = FOLDER_SENDING_FROM_LOCAL / filename + '.png',
+               remote_path       = FOLDER_STORING_IN_CLUSTER,
+               hostname          = HOSTNAME,
+               port              = PORT,
+               username          = USERNAME)
+
